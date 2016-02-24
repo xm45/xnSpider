@@ -295,10 +295,12 @@ class Log:
 			self.fd.create()
 		for work in self.fd.finished:
 			if self.fd.remove(self.name(work)):
-				print("LOG [ %s ] :已结束事务的日志文件 [ %s ] 已删除"%(self.fd.getName(),self.name(work)))
+				#print("LOG [ %s ] :已结束事务的日志文件 [ %s ] 已删除"%(self.fd.getName(),self.name(work)))
+				pass
 		self.fd.modify(self.fd.cache)
 		if self.fd.finished:
-			print("LOG [ %s ] :无效事务已被删除"%self.fd.getName())
+			#print("LOG [ %s ] :无效事务已被删除"%self.fd.getName())
+			pass
 		self.log = {}
 		for LogId in self.fd.extid:
 			fd = File(self.name(LogId))
@@ -308,7 +310,7 @@ class Log:
 		self.work = {}
 		for line in self.fd.cache:
 			self.work[line['id']] = make(line['id'],line['action'],line['func'],line['data'])
-		print("已载入所有事务的日志")
+		#print("已载入所有事务的日志")
 		print("")
 	def __del__(self):
 		pass

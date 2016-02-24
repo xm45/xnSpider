@@ -1,9 +1,16 @@
-download the photo in RenRen
+文件表和类表见table.py
 
-Simulate the HTTP request
+下一版本：
+更新控制器功能
+图形化
 
-can only download the photo which you can view directly(without password)
-
-use `requests` module, see http://www.python-requests.org for more
+性能：我的相册
+相册单位多线程
+cost 19.433218002319336
+人单位多线程
+cost 16.66533088684082
+相册单位单线程
+cost 33.58836793899536
+目前 人单位多线程
 
 by Meepo

@@ -10,6 +10,9 @@ import threadPool
 import xnString
 import makeLog
 
+defaultDir = r"D:/图片/renren/"
+userFile = "userFile.pickle"
+rename_file = True
 
 def createFile(filename):
 	directory = ""
@@ -24,7 +27,6 @@ def createFile(filename):
 		else:
 			os.makedirs(directory)
 #
-userFile = "userFile.pickle"
 #
 class User:
 	username = ''
@@ -78,12 +80,11 @@ class SelfidDiffError(Exception):
 #
 #
 class Spider:
-	#线程池
-	__pool = threadPool.Pool(64)
 	#构造函数
-	def __init__(self,logdir = "lg",prwork = True, prdown = False):
+	def __init__(self, logdir = "lg",prwork = True, prdown = True):
 		self.__session = requests.session()
-		#self.__albumlist = []
+		#线程池
+		self.__pool = threadPool.Pool(8)
 		self.__cnt = 0
 		self.flag_pwm = prwork#print work message flag
 		self.flag_pdm = prdown#print download message flag
@@ -111,7 +112,7 @@ class Spider:
 			return True
 		else:
 			self.work_msg("\n登录失败！\n")
-			self.work_msg(retdict['failDescription']+'\n')
+			self.work_msg(resdict['failDescription']+'\n')
 			return False
 	#登出
 	def logout(self):
@@ -123,11 +124,27 @@ class Spider:
 		ret = None
 		while True:
 			try:
-				ret = self.__session.get(domain, stream = stream)
-			except Exception as e:
-				print(e)
-			if ret:
+				ret = self.__session.get(domain, stream = stream, timeout = timeout)
+				if ret.status_code != 200 or len(ret.content) < 200:
+					print(ret.status_code, len(ret.content), domain)
+					print(ret.text)
+					time.sleep(1)
+					continue
+					return None
+				retlen = len(ret.content)
+				reqlen = ret.headers.get('Content-Length')
+				if  reqlen != None and retlen < int(reqlen):
+					print("Length Inconsistency");
+					print("domain: ",domain)
+					print(reqlen)
+					print(retlen)
+					print("retry")
+					continue
 				return ret
+			except Exception as e:
+				print("\n")
+				print(e)
+				time.sleep(1)
 	#获取cookies
 	def getcookies(self, domain = r"http://www.renren.com/home"):
 		response = self.getHtml(domain)
@@ -157,7 +174,7 @@ class Spider:
 		return self.__cnt
 	#等待下载任务结束
 	def wait_allcomplete(self, data = ""):
-		self.__pool.wait_allcomplete(data)
+		self.__pool.wait_allcomplete(data, self.flag_pdm)
 	#获取相册列表
 	def getAlbumlist(self, Uid):
 		domain = "http://photo.renren.com/photo/%s/albumlist/v7"%Uid
@@ -169,7 +186,13 @@ class Spider:
 			self.work_msg("\t\t从用户id[ %s ]获取用户信息失败\n"%Uid)
 			return []
 	#下载相册
-	def getAlbum(self, Uid, Aid, directory = r'renren/'):
+	def makeAlbumName(self, old_name, Uid):
+		if old_name in ['快速上传','手机相册','头像相册']:
+			return old_name + "—" + self.getNameByUid(Uid)
+		else:
+			return old_name
+	def getAlbum(self, Uid, Aid, directory = defaultDir):
+		global rename_file
 		plist = r'http://photo.renren.com/photo/%s/album-%s/bypage/ajax/v7?page=%d&pageSize=100'
 		domain = "http://photo.renren.com/photo/%s/album-%s/v7"%(Uid,Aid)
 		response = self.getHtml(domain)
@@ -184,6 +207,9 @@ class Spider:
 		if metadata['photoCount'] == 0:
 			return
 		pageId = 1
+
+		metadata['albumName'] = self.makeAlbumName(metadata['albumName'], Uid)
+
 		adir = directory + xnString.checkDirName(metadata['albumName'])+'/'
 		createFile(adir)
 		if self.flag_pdm:
@@ -203,7 +229,13 @@ class Spider:
 				for photo in photolist:
 					url = photo['url']
 					pos = str(photo['position'])
-					filename = adir + pos + xnString.getSuffix(url)
+					if rename_file:
+						filename = adir + pos + xnString.getSuffix(url)
+					else:
+						#test
+						purl = url.split('/')
+						filename = adir + purl[-1]
+						#test
 					if os.path.exists(filename) and os.path.getsize(filename) != 0:
 						continue
 					else:
@@ -213,13 +245,14 @@ class Spider:
 			else:
 				self.work_msg("找不到photoList, User:%s Album:%s Page:%d\n"%(Uid,Aid,pageId))
 			pageId += 1
-		#if self.flag_wfa:
-		#	self.__pool.wait_allcomplete()
+
 	#下载图片
 	def getPic(self, url, filename, mutex):
-		pl = filename.split('/')
-		pname = pl[-1]
+		#pl = filename.split('/')
+		#pname = pl[-1]
 		response = self.getHtml(url,stream = True)
+		if not response:
+			return
 		while True:
 			mutex.acquire()
 			with open(filename,"wb") as fd:
@@ -232,7 +265,7 @@ class Spider:
 	def getPicT(self, args, mutex):
 		self.getPic(args[0],args[1],mutex)
 	#获取路径名
-	def getDirName(self, Uid, Uname = "", directory = r'renren/'):
+	def getDirName(self, Uid, Uname = "", directory = defaultDir):
 		Uname = Uname or self.getNameByUid(Uid)
 		dirname = directory + xnString.checkDirName(Uname) + "   "+ Uid +'/'
 		return dirname
@@ -243,7 +276,7 @@ class Spider:
 		friends = xnString.getFriendlist(response.text, domain, 'getFriends')
 		return friends
 	#无log版本
-	def work_nolog(self, mode, directory = r'renren/', **args):
+	def work_nolog(self, mode, directory = defaultDir, **args):
 		if 'args' in args:
 			args = args['args']
 		if mode == enum.func.album:
@@ -286,7 +319,7 @@ class Spider:
 		else:
 			InvalidModeError(mode)
 	#有log版本
-	def work(self, mode , directory = r'renren/', uselog = True, **args):
+	def work(self, mode , directory = defaultDir, uselog = True, **args):
 		if 'args' in args:
 			args = args['args']
 		for attr in enum.need[mode]['input']:
@@ -318,6 +351,7 @@ class Spider:
 		if mode == enum.func.album:
 			dirname = directory + "_相册/"
 			self.getAlbum(args['Uid'], args['Aid'], dirname)
+			self.wait_allcomplete("\n该相册下载完成\n")
 			self.log.finish(LogId)
 		elif mode == enum.func.user:
 			dirname = self.getDirName(Uid, Uname, directory)
@@ -392,6 +426,7 @@ class Spider:
 		if mode == enum.func.album:
 			dirname = directory + "_相册/"
 			self.getAlbum(Uid, Aid, dirname)
+			self.wait_allcomplete("\n该相册下载完成\n")
 			self.log.finish(LogId)
 		elif mode == enum.func.user:
 			dirname = self.getDirName(Uid, Uname, directory)
@@ -426,13 +461,13 @@ class Spider:
 		mode,args = xnString.analysisDomain(domain)
 		return [mode,args]
 class SpiderCmd(Spider):
-	def __init__(self):
-		super(SpiderCmd, self).__init__()
+	def __init__(self, logdir = "lg",prwork = True, prdown = True):
+		super(SpiderCmd, self).__init__(logdir, prwork, prdown)
 	def getByAll(self):
 		self.recount()
 		start = time.time()
 		self.work(enum.func.friend)
-		self.wait_allcomplete()
+		self.wait_allcomplete("\n本次下载完成\n")
 		end = time.time()
 		print("总共 %s 张图片  耗时 %s"%(self.count(), end-start))
 	def getByUser(self):
@@ -443,7 +478,7 @@ class SpiderCmd(Spider):
 		self.recount()
 		start = time.time()
 		self.work(enum.func.user, Uid = Uid)
-		self.wait_allcomplete()
+		self.wait_allcomplete("\n该用户下载完成\n")
 		end = time.time()
 		print("总共 %s 张图片  耗时 %s"%(self.count(), end-start))
 	def getByAlbum(self):
@@ -456,55 +491,61 @@ class SpiderCmd(Spider):
 		start = time.time()
 		#self.getAlbum(Uid,Aid)
 		self.work(enum.func.album, Uid = Uid, Aid = Aid)
-		self.wait_allcomplete()
+		self.wait_allcomplete("\n该相册下载完成\n")
 		end = time.time()
 		print("总共 %s 张图片  耗时 %s"%(self.count(), end-start))
 	def getByDomain(self):
-		domain = input('可分析的有 相片地址、分享相片地址、相册地址、相册列表地址、个人主页地址、自身好友列表地址\n\
-		请输入地址：')
-		mode,args = self.Domain(domain)
-		if not mode:
-			print("无法解析的地址")
-			return
-		if mode == enum.func.share:
-			response = self.getHtml(domain)
-			domain = xnString.getPhotoFromShareHtml(response.text)
-			if not domain:
-				print("无法从分享页面分析出照片地址")
+		msg = '\n可分析的有 \n\t相片地址\n\t分享相片地址\n\t相册地址\n\t相册列表地址\n\t个人主页地址\n\t自己好友列表地址\n\t输入finish退出\n\t输入exit结束\n请输入地址：'
+		while True:
+			domain = input(msg)
+			if domain == "finish":
 				return
-			mode = enum.func.photo
-		if mode == enum.func.photo:
-			response = self.getHtml(domain)
-			args = xnString.getAlbumFromPhotoHtml(response.text)
-			if not args:
-				print("无法从照片地址分析出相册地址")
-				return
-			mode = enum.func.album
-		self.recount()
-		start = time.time()
-		self.work(mode, args = args)
-		self.wait_allcomplete()
-		end = time.time()
-		print("总共 %s 张图片  耗时 %s"%(self.count(), end-start))
+			if domain == "exit":
+				exit(0)
+			mode,args = self.Domain(domain)
+			if not mode:
+				print("无法解析的地址")
+				continue
+			if mode == enum.func.share:
+				response = self.getHtml(domain)
+				domain = xnString.getPhotoFromShareHtml(response.text)
+				if not domain:
+					print("无法从分享页面分析出照片地址")
+					continue
+				mode = enum.func.photo
+			if mode == enum.func.photo:
+				response = self.getHtml(domain)
+				args = xnString.getAlbumFromPhotoHtml(response.text)
+				if not args:
+					print("无法从照片地址分析出相册地址")
+					continue
+				mode = enum.func.album
+			self.recount()
+			start = time.time()
+			self.work(mode, args = args)
+			self.wait_allcomplete("\n本次下载完成\n")
+			end = time.time()
+			print("总共 %s 张图片  耗时 %s"%(self.count(), end-start))
 	def getByLog(self):
 		while True:
-			print("选择LOG文件,0退出")
-			for WorkId in self.log.work:
-				line = self.log.work[WorkId]
-				print("\t%s\t\t下载对象:%s\t\t下载阶段:%s\t\t数据:%s"%(line['id'],line['func'],line['action'],line['data']))
-			LogId = input("输入序号:")
-			if not LogId in self.log.fd.extid:
-				if LogId == '0':
-					return
-				print("序号错误")
-			else:
-				break
-		self.recount()
-		start = time.time()
-		self.recover(LogId)
-		self.wait_allcomplete()
-		end = time.time()
-		print("总共 %s 张图片  耗时 %s"%(self.count(), end-start))
+			while True:
+				print("选择LOG文件,输入0退出")
+				for WorkId in self.log.work:
+					line = self.log.work[WorkId]
+					print("\t\t%s\t\t下载对象:%s\t\t下载阶段:%s\t\t数据:%s"%(line['id'],line['func'],line['action'],line['data']))
+				LogId = input("\n输入序号:")
+				if not LogId in self.log.fd.extid:
+					if LogId == '0':
+						return
+					print("序号错误")
+				else:
+					break
+			self.recount()
+			start = time.time()
+			self.recover(LogId)
+			self.wait_allcomplete("\n本次下载完成\n")
+			end = time.time()
+			print("总共 %s 张图片  耗时 %s"%(self.count(), end-start))
 def controller():
 	global userFile
 	work = SpiderCmd()
@@ -539,7 +580,7 @@ def controller():
 		elif mode == "5":
 			work.getByLog()
 		else:
-			print("序号错误")
+			print("序号错误\n")
 def main():
 	controller()
 	pass

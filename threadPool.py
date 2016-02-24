@@ -25,11 +25,12 @@ class Pool:
 	def add_job(self, func, *args):
 		self.add('cnt', 1)
 		self.works.put((func, list(args)))
-	def wait_allcomplete(self, inf = "\nall complete"):
+	def wait_allcomplete(self, inf = "\nall complete", pr = True):
 		while True:
 			size = self.getSize()
 			if size != self.last:
-				print(size,end = " ",flush = True)
+				if pr:
+					print(size,end = " ",flush = True)
 				#if size == 1:
 				#	self.pr()
 			if size != 0:
@@ -102,7 +103,13 @@ class Consumer(threading.Thread):
 		while True:
 			func,args = self.work_queue.get()
 			self.set('running',True)
-			func(args, mutex = self.filemutex)
+			while True:
+				try:
+					func(args, mutex = self.filemutex)
+					break
+				except Exception as e:
+					print()
+					print(e)
 			self.add('cnt', 1)
 			self.fadd('cnt', -1)
 			self.work_queue.task_done()
